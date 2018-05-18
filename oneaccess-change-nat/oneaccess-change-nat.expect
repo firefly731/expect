@@ -1,0 +1,130 @@
+#!/usr/bin/expect
+
+set timeout 5
+
+set user [lindex $argv 0]
+set password [lindex $argv 1]
+set ipaddr [lindex $argv 2]
+set file "oneaccess-change-nat.log"
+
+spawn ssh $user@$ipaddr
+
+expect ".*"
+
+
+if {[info exists expect_out(buffer)] == 0} {
+    if {[catch {open $file a+} fid]} {
+        puts stderr "Could not open $someFile for writing\n$fid"
+        exit 1
+    } else {
+        set fh [open $file a+]
+        puts $fh "IP : $ipaddr"
+        puts $fh "Status : ERROR"
+        puts $fh "Connection problem\n"
+        close $fh
+        exit 1
+    }
+}
+
+switch -regexp -- $expect_out(buffer) {
+    {yes/no} {
+        send "yes\r"
+        expect "password:" { send "$password\r" }
+    }
+    {password:} {
+        send "$password\r"
+    }
+    {Could not resolve hostname} {
+        if {[catch {open $file a+} fid]} {
+            puts stderr "Could not open $someFile for writing\n$fid"
+            exit 1
+        } else {
+            set fh [open $file a+]
+            puts $fh "IP : $ipaddr"
+            puts $fh "Status : ERROR"
+            puts $fh "Could not resolve hostname\n"
+            close $fh
+            exit 1
+        }
+    }
+    {usage} {
+        if {[catch {open $file a+} fid]} {
+            puts stderr "Could not open $someFile for writing\n$fid"
+            exit 1
+        } else {
+            set fh [open $file a+]
+            puts $fh "IP : $ipaddr"
+            puts $fh "Status : ERROR"
+            puts $fh "Login missing\n"
+            close $fh
+            exit 1
+        }
+    }
+    default {
+        if {[catch {open $file a+} fid]} {
+            puts stderr "Could not open $someFile for writing\n$fid"
+            exit 1
+        } else {
+            set fh [open $file a+]
+            puts $fh "IP : $ipaddr"
+            puts $fh "Status : ERROR"
+            puts $fh "$expect_out(buffer)\n"
+            close $fh
+            exit 1
+        }
+    }
+}
+
+expect ".*"
+
+switch -regexp -- $expect_out(buffer) {
+    {Permission denied} {
+        if {[catch {open $file a+} fid]} {
+            puts stderr "Could not open $someFile for writing\n$fid"
+            exit 1
+        } else {
+            set fh [open $file a+]
+            puts $fh "IP : $ipaddr"
+            puts $fh "Status : ERROR"
+            puts $fh "Permission denied\n"
+            close $fh
+            exit 1
+        }
+    }
+    default {
+        expect {*[#>]} { regexp {([\d\w].*)[#>]} $expect_out(buffer) hostname1 hostname2 }
+        send "show system hardware\r"
+        expect {[#>]} { regexp {(ONE)(\d*)} $expect_out(buffer) version1 version2 version3}
+        expect {*} { send "configure terminal\r" }
+        if { $version3 == 540 || $version3 == 1540 } {
+            expect {(configure)[#>]} { send "ip nat translation max-sessions 20000\r" }
+        } elseif { $version3 == 2510 } {
+            expect {(configure)[#>]} { send "ip nat translation max-sessions 250000\r" }
+        } else {
+            if {[catch {open $file a+} fid]} {
+                puts stderr "Could not open $someFile for writing\n$fid"
+                exit 1
+            } else {
+                set fh [open $file a+]
+                puts $fh "IP : $ipaddr"
+                puts $fh "Status : ERROR"
+                puts $fh "Unsupported or undefined model : $version3\n"
+                close $fh
+            }
+        }
+        expect {(configure)[#>]} { send "exit\r" }
+        expect {[#>]} { send "save running-config\r" }
+        expect {[#>]} { send "exit\r" }
+        if {[catch {open $file a+} fid]} {
+            puts stderr "Could not open $someFile for writing\n$fid"
+            exit 1
+        } else {
+            set fh [open $file a+]
+            puts $fh "IP : $ipaddr"
+            puts $fh "hostname : $hostname2"
+            puts $fh "version : ONE$version3"
+            puts $fh "Status : OK\n"
+            close $fh
+        }
+    }
+}
